@@ -1,0 +1,95 @@
+use teloxide::prelude::*;
+use teloxide::types::{InputFile, MessageKind};
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
+use std::env;
+use dotenv::dotenv;
+use std::fs::File;
+use std::io::Write;
+use base64::decode;
+
+#[derive(Serialize)]
+struct OpenAIImageRequest {
+    prompt: String,
+    n: u8,
+    size: String,
+}
+
+#[derive(Deserialize)]
+struct OpenAIImageResponse {
+    data: Vec<ImageData>,
+}
+
+#[derive(Deserialize)]
+struct ImageData {
+    url: String,
+}
+
+async fn get_dalle_image(client: &Client, api_key: &str, prompt: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let request_body = OpenAIImageRequest {
+        prompt: prompt.to_string(),
+        n: 1,
+        size: "512x512".to_string(),
+    };
+
+    let res = client
+        .post("https://api.openai.com/v1/images/generations")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .json(&request_body)
+        .send()
+        .await?;
+
+    let response_body: OpenAIImageResponse = res.json().await?;
+    Ok(response_body.data.get(0).unwrap().url.clone())
+}
+
+async fn download_image(url: &str, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let response = reqwest::get(url).await?;
+    let bytes = response.bytes().await?;
+    let mut file = File::create(filename)?;
+    file.write_all(&bytes)?;
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() {
+    dotenv().ok();
+    let bot = Bot::from_env().auto_send();
+    let api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY not found");
+
+    teloxide::repl(bot, move |message: Message, bot: AutoSend<Bot>| {
+        let api_key = api_key.clone();
+        async move {
+            let client = Client::new();
+
+            match &message.kind {
+                MessageKind::Common(msg) => {
+                    if let Some(text) = msg.text() {
+                        if text.to_lowercase().starts_with("сгенерировать изображение") {
+                            let prompt = text.replacen("сгенерировать изображение", "", 1).trim().to_string();
+                            match get_dalle_image(&client, &api_key, &prompt).await {
+                                Ok(url) => {
+                                    let filename = "generated_image.png";
+                                    if let Err(e) = download_image(&url, filename).await {
+                                        bot.send_message(message.chat.id, format!("Ошибка загрузки изображения: {}", e)).await?;
+                                    } else {
+                                        bot.send_photo(message.chat.id, InputFile::file(filename)).await?;
+                                    }
+                                }
+                                Err(e) => {
+                                    bot.send_message(message.chat.id, format!("Ошибка генерации изображения: {}", e)).await?;
+                                }
+                            }
+                        } else {
+                            // Обработка других текстовых команд
+                            bot.send_message(message.chat.id, "Введите команду 'сгенерировать изображение [описание]', чтобы создать изображение.").await?;
+                        }
+                    }
+                }
+                _ => {}
+            }
+            respond(())
+        }
+    })
+    .await;
+}
