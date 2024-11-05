@@ -1,0 +1,9 @@
+[dependencies]
+teloxide = "0.7"                    # Для работы с Telegram API
+reqwest = { version = "0.11", features = ["json"] } # Для работы с HTTP-запросами к OpenAI API
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+dotenv = "0.15"
+image = "0.24.5"                    # Для обработки изображений
+base64 = "0.21.0"                   # Для декодирования изображений из base64
